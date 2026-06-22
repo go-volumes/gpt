@@ -154,6 +154,36 @@ func TestListGPT_Valid(t *testing.T) {
 	}
 }
 
+func TestESPAndBIOSBootGUIDs(t *testing.T) {
+	// Sanity: the wire bytes match the canonical type GUIDs.
+	if EFISystemPartitionGUID[0] != 0x28 || EFISystemPartitionGUID[15] != 0x3B {
+		t.Fatalf("ESP GUID wire bytes wrong: %x", EFISystemPartitionGUID)
+	}
+	if BIOSBootGUID[0] != 0x48 || BIOSBootGUID[15] != 0x49 {
+		t.Fatalf("BIOS Boot GUID wire bytes wrong: %x", BIOSBootGUID)
+	}
+
+	b := newGPT()
+	b.numParts = 3
+	b.entries = nil
+	b.entries = append(b.entries, gptEntry(b.entrySize, BIOSBootGUID, 34, 2047, "bios")...)
+	b.entries = append(b.entries, gptEntry(b.entrySize, EFISystemPartitionGUID, 2048, 1050623, "EFI System Partition")...)
+	b.entries = append(b.entries, gptEntry(b.entrySize, LinuxFilesystemGUID, 1050624, 2097151, "root")...)
+	img := b.build()
+
+	esp, err := ByType(img, b.deviceSize, EFISystemPartitionGUID)
+	if err != nil || esp.Index != 2 || esp.StartOffset != 2048*SectorSize {
+		t.Fatalf("ByType ESP: %+v err %v", esp, err)
+	}
+	if esp.Name != "EFI System Partition" {
+		t.Fatalf("ESP name = %q", esp.Name)
+	}
+	bios, err := ByType(img, b.deviceSize, BIOSBootGUID)
+	if err != nil || bios.Index != 1 {
+		t.Fatalf("ByType BIOS Boot: %+v err %v", bios, err)
+	}
+}
+
 func TestListGPT_HardeningVectors(t *testing.T) {
 	cases := []struct {
 		name   string
