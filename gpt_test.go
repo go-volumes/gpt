@@ -167,19 +167,19 @@ func TestESPAndBIOSBootGUIDs(t *testing.T) {
 	b.numParts = 3
 	b.entries = nil
 	b.entries = append(b.entries, gptEntry(b.entrySize, BIOSBootGUID, 34, 2047, "bios")...)
-	b.entries = append(b.entries, gptEntry(b.entrySize, EFISystemPartitionGUID, 2048, 1050623, "EFI System Partition")...)
-	b.entries = append(b.entries, gptEntry(b.entrySize, LinuxFilesystemGUID, 1050624, 2097151, "root")...)
+	b.entries = append(b.entries, gptEntry(b.entrySize, EFISystemPartitionGUID, 2048, 10239, "EFI System Partition")...)
+	b.entries = append(b.entries, gptEntry(b.entrySize, LinuxFilesystemGUID, 10240, 20479, "root")...)
 	img := b.build()
 
 	esp, err := ByType(img, b.deviceSize, EFISystemPartitionGUID)
-	if err != nil || esp.Index != 2 || esp.StartOffset != 2048*SectorSize {
+	if err != nil || esp.Index != 1 || esp.StartOffset != 2048*SectorSize {
 		t.Fatalf("ByType ESP: %+v err %v", esp, err)
 	}
 	if esp.Name != "EFI System Partition" {
 		t.Fatalf("ESP name = %q", esp.Name)
 	}
 	bios, err := ByType(img, b.deviceSize, BIOSBootGUID)
-	if err != nil || bios.Index != 1 {
+	if err != nil || bios.Index != 0 {
 		t.Fatalf("ByType BIOS Boot: %+v err %v", bios, err)
 	}
 }
