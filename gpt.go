@@ -9,7 +9,7 @@
 // reject overflow, and a truncated or short header returns an error instead
 // of panicking. It never auto-follows nonsensical geometry.
 //
-// Pure Go, no dependencies outside the standard library, go 1.25 / CGO=0.
+// Pure Go, no dependencies outside the standard library, go 1.26.4 / CGO=0.
 package gpt
 
 import (
