@@ -62,8 +62,15 @@ func (b *gptBuilder) build() byteReaderAt {
 
 // gptEntry builds one entry of entrySize bytes.
 func gptEntry(entrySize uint32, typeGUID [16]byte, startLBA, endLBA uint64, name string) []byte {
+	return gptEntryWithUUID(entrySize, typeGUID, [16]byte{}, startLBA, endLBA, name)
+}
+
+// gptEntryWithUUID is the same with the entry's own GUID set, which is the one
+// a person writes down (PARTUUID).
+func gptEntryWithUUID(entrySize uint32, typeGUID, uniqueGUID [16]byte, startLBA, endLBA uint64, name string) []byte {
 	e := make([]byte, entrySize)
 	copy(e[0:16], typeGUID[:])
+	copy(e[16:32], uniqueGUID[:])
 	binary.LittleEndian.PutUint64(e[32:], startLBA)
 	binary.LittleEndian.PutUint64(e[40:], endLBA)
 	u := utf16.Encode([]rune(name))
@@ -582,4 +589,93 @@ func FuzzList(f *testing.F) {
 			}
 		}
 	})
+}
+
+// The unique GUID -- PARTUUID -- is read, spelled the way everything else
+// spells it, and can be looked up.
+func TestTheUniquePartitionGUID(t *testing.T) {
+	// 12345678-9abc-def0-1122-334455667788, in the mixed on-disk order UEFI
+	// specifies: the first three groups little-endian, the last two as they
+	// read.
+	unique := [16]byte{
+		0x78, 0x56, 0x34, 0x12,
+		0xBC, 0x9A,
+		0xF0, 0xDE,
+		0x11, 0x22,
+		0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+	}
+	b := newGPT()
+	b.numParts = 2
+	b.entries = append(b.entries[:0], gptEntryWithUUID(b.entrySize, LinuxFilesystemGUID, unique, 2048, 4095, "data")...)
+	b.entries = append(b.entries, make([]byte, b.entrySize)...)
+	img := b.build()
+
+	parts, err := List(img, b.deviceSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parts) != 1 {
+		t.Fatalf("%d partitions", len(parts))
+	}
+	if parts[0].UniqueGUID != unique {
+		t.Errorf("UniqueGUID = %x", parts[0].UniqueGUID)
+	}
+	// ⛔ The spelling is the point: printing the sixteen bytes in order would
+	// give 78563412-bc9a-f0de-... , which looks like a GUID, is wrong, and
+	// matches nothing anybody copied out of lsblk.
+	const want = "12345678-9abc-def0-1122-334455667788"
+	if got := parts[0].UUID(); got != want {
+		t.Errorf("UUID() = %s, want %s", got, want)
+	}
+
+	// And back again, so a caller can compare what was written down.
+	back, err := ParseUUID(want)
+	if err != nil || back != unique {
+		t.Errorf("ParseUUID(%s) = %x, %v", want, back, err)
+	}
+	if _, err := ParseUUID("not-a-guid"); err == nil {
+		t.Error("a string that is not a GUID was parsed as one")
+	}
+	if _, err := ParseUUID("12345678-9abc-def0-1122-33445566778z"); err == nil {
+		t.Error("a GUID with a non-hexadecimal digit was parsed")
+	}
+
+	// Looking one up, by UUID and by name.
+	p, err := ByUUID(img, b.deviceSize, want)
+	if err != nil || p.Index != 0 {
+		t.Errorf("ByUUID: %+v, %v", p, err)
+	}
+	if _, err := ByUUID(img, b.deviceSize, "00000000-0000-0000-0000-000000000000"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a UUID nothing has gave %v", err)
+	}
+	p, err = ByName(img, b.deviceSize, "data")
+	if err != nil || p.Index != 0 {
+		t.Errorf("ByName: %+v, %v", p, err)
+	}
+	if _, err := ByName(img, b.deviceSize, "nothing"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a name nothing has gave %v", err)
+	}
+}
+
+// An MBR partition has neither, and says so rather than inventing one.
+func TestMBRHasNoUUIDOrName(t *testing.T) {
+	const size = 4 << 20
+	img := mbrImage(size, func(table []byte) {
+		table[4] = 0x83 // Linux
+		binary.LittleEndian.PutUint32(table[8:], 2048)
+		binary.LittleEndian.PutUint32(table[12:], 64)
+	})
+	parts, err := List(img, size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parts) != 1 {
+		t.Fatalf("%d partitions", len(parts))
+	}
+	if parts[0].UUID() != "" || parts[0].Name != "" {
+		t.Errorf("an MBR partition claims UUID %q and name %q", parts[0].UUID(), parts[0].Name)
+	}
+	if _, err := ByUUID(img, size, "12345678-9abc-def0-1122-334455667788"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("ByUUID on an MBR table gave %v", err)
+	}
 }
