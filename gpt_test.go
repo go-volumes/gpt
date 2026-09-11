@@ -679,3 +679,21 @@ func TestMBRHasNoUUIDOrName(t *testing.T) {
 		t.Errorf("ByUUID on an MBR table gave %v", err)
 	}
 }
+
+// A lookup on an image with no table at all fails as "no table", not as "not
+// found": the difference is whether somebody gave the wrong name or the wrong
+// image, and they are fixed differently.
+func TestLookupsOnAnImageWithNoTable(t *testing.T) {
+	bare := byteReaderAt(make([]byte, 1<<20))
+	if _, err := ByUUID(bare, 1<<20, "12345678-9abc-def0-1122-334455667788"); !errors.Is(err, ErrNoTable) {
+		t.Errorf("ByUUID on a bare image gave %v", err)
+	}
+	if _, err := ByName(bare, 1<<20, "data"); !errors.Is(err, ErrNoTable) {
+		t.Errorf("ByName on a bare image gave %v", err)
+	}
+	// And a UUID that is not one is refused before the image is even read,
+	// which is why a bare image does not shadow the message.
+	if _, err := ByUUID(bare, 1<<20, "nonsense"); errors.Is(err, ErrNoTable) {
+		t.Error("a malformed UUID was reported as a missing table")
+	}
+}
